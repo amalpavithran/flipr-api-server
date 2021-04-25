@@ -1,3 +1,5 @@
+import "core-js/stable";
+import "regenerator-runtime/runtime";
 const dotenv = require('dotenv');
 dotenv.config();
 var express = require("express");
