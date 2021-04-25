@@ -1,12 +1,8 @@
-import "core-js/stable";
-import "regenerator-runtime/runtime";
-const dotenv = require('dotenv');
-dotenv.config();
 var express = require("express");
 var cors = require("cors")
 var app = express();
 
-var connection_string = process.env.DB_CONNECTION_STRING;
+var connection_string = "mongodb://127.0.0.1:27017/flipr";
 const mongoose = require('mongoose');
 const { default: MatchModel } = require("./schemas/match_schema");
 const { default: TeamsModel } = require("./schemas/team_schema");
@@ -49,6 +45,135 @@ app.post("users/signup", function (req, res) {
 
 })
 
+app.get("/getBallData",  async function (req, res) {
+    // console.log("gettingBallData")
+    const matchId = req.query.matchId;
+    const ballNo = req.query.ballNo;
+    const innings = req.query.innings;
+    var userTeam = req.query.userTeam;
+    console.log("gettingBallData" + ballNo)
+    // console.log("MatchId",matchId)
+    // console.log("BallNo",ballNo)
+    // console.log(innings)
+    var match = await MatchModel.findById(matchId).lean();
+    var matchInning = match.innings[innings]
+    var matchOver = false
+    if(innings == 0){
+        var deliveries = matchInning['1st innings']
+    }
+    else{
+        var deliveries = matchInning['2nd innings']
+    }
+    if(ballNo >= deliveries.deliveries.length-2){
+        matchOver=true
+    }
+    var currBall =  deliveries.deliveries[ballNo]
+    var overNo =  String(Object.keys(currBall)[0])
+    var currBallData = currBall[String(Object.keys(currBall)[0])]
+    var runs = currBallData.runs.total;
+    var wickets = currBallData.wicket;
+    const eventData  = {"caught" : 25, "bowled" : 33, "run out" : "25", "lbw" : 33, "retired hurt" : 0, "stumped" : 25, "caught and bowled" : 40, "hit wicket" : "25"}
+    userTeam =  userTeam.map((player)=>{
+        player = JSON.parse(player);
+        player.playerName = player.playerName.trim().split('-')[0]
+        // console.log(player)
+        if(wickets!==undefined){
+            if(player.playerName === wickets.player_out){
+                player.battingData.out = true;
+                player.battingData.outType = wickets.kind;
+            }
+            else if(player.playerName === currBallData.bowler){
+                player.bowlingData.wickets = player.bowlingData.wickets + 1
+                var eventPt = eventData[String(wickets.kind)]
+                player.points = player.points + eventPt
+            }
+            }
+        if(player.playerName  === currBallData.batsman){
+
+                player.battingData.runs = player.battingData.runs + runs;
+                if(currBallData.runs.batsman >= 6){
+                    player.battingData["6s"] = player.battingData["6s"] + 1
+                }
+                else if(currBallData.runs.batsman >= 4){
+                    player.battingData["4s"] = player.battingData["4s"] + 1
+                }
+                player.battingData.balls = player.battingData.balls + 1;
+                var pts = runs*(1+(player.isCaptain*2))*(1+(player.isVCaptain*0.5))
+                if((runs % 50 == 0)&  (runs%100!=0)){
+                    pts = pts + 58
+                }
+                player.points = player.points + pts
+            }
+            if(player.isCaptain){
+                player.playerName = player.playerName.trim().split('-')[0]+ "  -  (C)"
+            }
+            if(player.isVCaptain){
+                player.playerName = player.playerName.trim().split('-')[0] + "  - (VC)"
+            }
+        return player;
+
+    })
+
+
+    // console.log(currBallData)
+    // console.log(userTeam)
+    var responseObj = {id : matchId, userTeam : userTeam, overNo:overNo, matchOver:matchOver}
+    res.json(responseObj)
+
+
+})
+
+app.get("/startMatch", async function (req, res) {
+    const matchId = req.query.id;
+    const selectedPlayers = req.query.selectedPlayers;
+    const captain = req.query.captain;
+    const vcaptain = req.query.vcaptain;
+    // console.log(selectedPlayers);
+    // console.log(captain);
+    // console.log(vcaptain);
+    var userTeam = []
+    var playerJson = selectedPlayers.map((player) => {
+        player = JSON.parse(player);
+        
+        var playerJson = {  playerName : player.playerName, 
+                        playerTeam : "",
+                        isCaptain : player.playerName == captain,
+                        isVCaptain : player.playerName == vcaptain, 
+                        battingData: {
+                            runs : 0,
+                            balls : 0,
+                            out : false,
+                            outType : "",
+                            "6s" : 0,
+                            "4s" : 0,
+                        },
+                        bowlingData: {
+                            overs : 0,
+                            runs : 0,
+                            wickets : 0,
+                        },
+                        points : 0,
+
+                        }
+                    return playerJson
+                    })
+        //userTeam.push(playerJson);
+        // console.log(playerJson)
+        var responseObj = {id : matchId, userTeam : playerJson}
+        res.json(responseObj)
+    // selectedPlayers.map()
+
+    // try{
+    //     var team = await TeamsModel.findById(matchId).lean();
+    //     console.log(team.players)
+    // }
+    // catch(error){
+    //     console.log(error);
+
+    // }
+
+});
+
 app.post("/users/team/set", async function (req, res) {
     const data = req.body;
     console.log(req.body);
@@ -81,7 +206,8 @@ app.post("/users/team/set", async function (req, res) {
 app.get("/matches", async function (req, res) {
     const skippedPages = parseInt(req.query.page) ? parseInt(req.query.page) : 0 * 20;
     try {
-        var results = await MatchModel.find({}, { "info.teams": 1 }, { skip: skippedPages, limit: 20 }).lean();
+        var results = await MatchModel.find({}, { "info.teams": 1 }, { skip: skippedPages, limit: 230 }).lean();
+        console.log(results.length)
         var final_response = results.map(function (result) {
             return {
                 "_id": result._id,
@@ -96,7 +222,7 @@ app.get("/matches", async function (req, res) {
 });
 
 app.get("/matches/:id/players", async function (req, res) {
-    const matchId = req.params.id;
+    const matchId = req.query.id;
     // console.log(matchId);
     try {
         var teams = await TeamsModel.findById(matchId).lean();
@@ -166,8 +292,8 @@ app.get("/", function (req, res) {
 process.on('uncaughtException', function (exception) {
     console.log(exception);
 });
-var server = app.listen(process.env.PORT, function () {
+var server = app.listen(8081, function () {
     var host = server.address().address;
     var port = server.address().port;
-    console.log("App listening at http://%s:%s", host, port);
+    console.log("Example app listening at http://%s:%s", host, port);
 });
