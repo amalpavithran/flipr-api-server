@@ -1,8 +1,12 @@
+import "core-js/stable";
+import "regenerator-runtime/runtime";
+const dotenv = require('dotenv');
+dotenv.config();
 var express = require("express");
 var cors = require("cors")
 var app = express();
 
-var connection_string = "mongodb://127.0.0.1:27017/flipr";
+var connection_string = process.env.DB_CONNECTION_STRING;
 const mongoose = require('mongoose');
 const { default: MatchModel } = require("./schemas/match_schema");
 const { default: TeamsModel } = require("./schemas/team_schema");
@@ -222,7 +226,7 @@ app.get("/matches", async function (req, res) {
 });
 
 app.get("/matches/:id/players", async function (req, res) {
-    const matchId = req.query.id;
+    const matchId = req.params.id;
     // console.log(matchId);
     try {
         var teams = await TeamsModel.findById(matchId).lean();
@@ -292,7 +296,7 @@ app.get("/", function (req, res) {
 process.on('uncaughtException', function (exception) {
     console.log(exception);
 });
-var server = app.listen(8081, function () {
+var server = app.listen(process.env.PORT, function () {
     var host = server.address().address;
     var port = server.address().port;
     console.log("Example app listening at http://%s:%s", host, port);
